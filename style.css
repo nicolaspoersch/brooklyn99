@@ -200,3 +200,47 @@ li {
     font-size: 36px;
   }
 }
+
+
+/* Home page cards */
+.writeup-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.writeup-card {
+  display: block;
+  text-decoration: none;
+  color: var(--text);
+  border: 1px solid var(--line);
+  background: var(--soft);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.writeup-card:hover {
+  filter: brightness(.98);
+}
+
+html[data-theme="dark"] .writeup-card:hover {
+  filter: brightness(1.08);
+}
+
+.writeup-card h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.writeup-card p {
+  margin: 0;
+}
+
+.small-link {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.small-link:hover {
+  text-decoration: underline;
+}

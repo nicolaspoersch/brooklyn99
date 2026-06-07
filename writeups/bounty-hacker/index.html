@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bounty Hacker — TryHackMe</title>
+  <link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle theme">
+    dark mode
+  </button>
+
+  <main class="page">
+    <p class="crumb"><a class="small-link" href="../../">Write-ups</a> / TryHackMe / Linux</p>
+
+    <h1>Bounty Hacker</h1>
+
+    <p class="lead">
+      My notes for the Bounty Hacker room. This is a simple walkthrough of how I moved from
+      anonymous FTP to SSH access, then used a sudo rule for tar to read the final flag.
+    </p>
+
+    <div class="meta">
+      <span>Easy</span>
+      <span>Linux</span>
+      <span>FTP</span>
+      <span>SSH</span>
+      <span>Hydra</span>
+      <span>sudo</span>
+      <span>tar</span>
+    </div>
+
+    <aside class="notice">
+      <strong>Small note before reading:</strong>
+      I do not usually write write-ups, so this is more of a clean learning log than
+      a polished guide. Also, if you are reading this just to copy answers, you are
+      using it the wrong way. A write-up should be used when you are genuinely stuck
+      or when you want to understand the reasoning behind a step.
+    </aside>
+
+    <hr>
+
+    <h2>0. Plan</h2>
+    <p>
+      The plan was simple: identify exposed services, check if any of them leaked useful files,
+      use those files to build a login path, then check what the user could run with higher privileges.
+    </p>
+
+    <pre><code>scan → anonymous FTP → collect files → find username → test SSH → check sudo → read flags</code></pre>
+
+    <h2>1. Initial scan</h2>
+    <p>
+      I started with Nmap using default scripts and version detection. This gives a quick view
+      of the exposed services and can reveal obvious misconfigurations before doing anything else.
+    </p>
+
+    <pre><code>nmap -sC -sV -T5 TARGET_IP</code></pre>
+
+    <img src="../../assets/bounty-hacker/nmap-enumeration.png" alt="Nmap result showing FTP and SSH">
+
+    <p>
+      The useful result was that FTP and SSH were open. The important part was the FTP script
+      result: anonymous login was allowed. Since SSH was also open, any username or password
+      hint found through FTP could become useful later.
+    </p>
+
+    <h2>2. Anonymous FTP</h2>
+    <p>
+      Since anonymous FTP was enabled, I connected without real credentials. This is always worth
+      checking because public FTP access often exposes notes, backups, usernames, password lists
+      or other hints.
+    </p>
+
+    <pre><code>ftp TARGET_IP
+Name: anonymous</code></pre>
+
+    <img src="../../assets/bounty-hacker/ftp-login.png" alt="Anonymous FTP login">
+
+    <p>
+      After logging in, I listed the directory. There were only two files: <code>locks.txt</code>
+      and <code>task.txt</code>. When a room gives only a small number of files, each one is
+      usually important.
+    </p>
+
+    <pre><code>ls
+get locks.txt
+get task.txt</code></pre>
+
+    <img src="../../assets/bounty-hacker/ftp-enumeration.png" alt="FTP directory listing showing locks.txt and task.txt">
+
+    <h2>3. Reading task.txt</h2>
+    <p>
+      I started with <code>task.txt</code> because small note files usually contain the first clue.
+      The content was mostly flavor text, but the signature at the bottom revealed a possible
+      username: <code>lin</code>.
+    </p>
+
+    <pre><code>cat task.txt</code></pre>
+
+    <img src="../../assets/bounty-hacker/task.txt.png" alt="task.txt revealing the username lin">
+
+    <p>
+      That changed the next step. I no longer had only open services; I had an actual username
+      that could be tested against SSH.
+    </p>
+
+    <h2>4. Reading locks.txt</h2>
+    <p>
+      The second file looked like a custom password list. Since SSH was open and <code>task.txt</code>
+      gave me the username <code>lin</code>, this file looked like it was meant to be used as the
+      password source.
+    </p>
+
+    <pre><code>cat locks.txt</code></pre>
+
+    <img src="../../assets/bounty-hacker/locks.txt.png" alt="locks.txt containing possible passwords">
+
+    <h2>5. Testing SSH</h2>
+    <p>
+      Instead of trying the passwords manually, I used Hydra against SSH. At this point the attack
+      was not random: FTP gave the username, FTP also gave the password list, and Nmap had already
+      shown that SSH was available.
+    </p>
+
+    <pre><code>hydra -l lin -P locks.txt TARGET_IP ssh</code></pre>
+
+    <img src="../../assets/bounty-hacker/hydra-result.png" alt="Hydra finding valid SSH credentials for lin">
+
+    <p>
+      Hydra found valid credentials for <code>lin</code>. The FTP information disclosure had turned
+      into SSH access.
+    </p>
+
+    <h2>6. User flag</h2>
+    <p>
+      After logging in through SSH, I searched for <code>user.txt</code> and found it inside
+      <code>/home/lin/Desktop</code>.
+    </p>
+
+    <pre><code>find / -name "user.txt" 2&gt;/dev/null
+cat /home/lin/Desktop/user.txt</code></pre>
+
+    <img src="../../assets/bounty-hacker/user-flag.png" alt="Reading the user flag">
+
+    <h2>7. Checking sudo</h2>
+    <p>
+      After getting a shell, one of the first checks is <code>sudo -l</code>. It shows what the
+      current user is allowed to run with elevated privileges.
+    </p>
+
+    <pre><code>sudo -l</code></pre>
+
+    <img src="../../assets/bounty-hacker/sudo-l.png" alt="sudo -l showing tar can be run as root">
+
+    <p>
+      The result showed that <code>lin</code> could run <code>/bin/tar</code> as root. That was the
+      privilege escalation path.
+    </p>
+
+    <h2>8. Getting root</h2>
+    <p>
+      <code>tar</code> can execute commands through its checkpoint action option. Because it was
+      allowed through sudo as root, I used it to spawn a root shell.
+    </p>
+
+    <pre><code>sudo /bin/tar cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/sh</code></pre>
+
+    <img src="../../assets/bounty-hacker/how-get-root.png" alt="Using tar checkpoint action to spawn a root shell">
+
+    <h2>9. Root flag</h2>
+    <p>
+      With a root shell available, reading the final flag was straightforward.
+    </p>
+
+    <pre><code>python3 -c 'import pty;pty.spawn("/bin/bash")'
+cd /root
+cat root.txt</code></pre>
+
+    <img src="../../assets/bounty-hacker/root-flag.png" alt="Reading root.txt as root">
+
+    <h2>10. Alternative method</h2>
+    <p>
+      There was also a shorter way to read the root flag without spawning an interactive root shell.
+      Since <code>tar</code> was allowed as root, it could archive <code>/root/root.txt</code> and print
+      the file content back through the pipeline.
+    </p>
+
+    <pre><code>sudo tar -cf - /root/root.txt 2&gt;/dev/null | tar -xOf - root/root.txt</code></pre>
+
+    <img src="../../assets/bounty-hacker/root-flag-read-method.png" alt="Reading root.txt directly using tar">
+
+    <p>
+      Both methods rely on the same misconfiguration: the user could run <code>tar</code> as root.
+      One method gives a root shell, while the other only reads the file directly.
+    </p>
+
+    <hr>
+
+    <p class="footer-note">
+      If you enjoyed this write-up, consider following me on TryHackMe. If this repository helped you,
+      consider giving it a star on GitHub. Thanks for reading.
+    </p>
+  </main>
+
+  <script>
+    const root = document.documentElement;
+    const button = document.getElementById("themeToggle");
+    const savedTheme = localStorage.getItem("theme");
+
+    if (savedTheme) {
+      root.setAttribute("data-theme", savedTheme);
+      button.textContent = savedTheme === "dark" ? "light mode" : "dark mode";
+    }
+
+    button.addEventListener("click", () => {
+      const current = root.getAttribute("data-theme");
+      const next = current === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      localStorage.setItem("theme", next);
+      button.textContent = next === "dark" ? "light mode" : "dark mode";
+    });
+  </script>
+</body>
+</html>

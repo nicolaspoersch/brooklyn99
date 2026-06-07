@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brooklyn Nine Nine — TryHackMe</title>
+  <link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle theme">
+    dark mode
+  </button>
+
+  <main class="page">
+    <p class="crumb"><a class="small-link" href="../../">Write-ups</a> / TryHackMe / Linux</p>
+
+    <h1>Brooklyn Nine Nine</h1>
+
+    <p class="lead">
+      My notes for the Brooklyn Nine Nine room. This is a simple walkthrough of
+      how I moved from anonymous FTP to SSH access, then used a sudo rule to read
+      the final flag.
+    </p>
+
+    <div class="meta">
+      <span>Easy</span>
+      <span>Linux</span>
+      <span>FTP</span>
+      <span>SSH</span>
+      <span>Hydra</span>
+      <span>sudo</span>
+    </div>
+
+    <aside class="notice">
+      <strong>Small note before reading:</strong>
+      I do not usually write write-ups, so this is more of a clean learning log than
+      a polished guide. Also, if you are reading this just to copy answers, you are
+      using it the wrong way. A write-up should be used when you are genuinely stuck
+      or when you want to understand the reasoning behind a step.
+    </aside>
+
+    <hr>
+
+    <h2>0. Plan</h2>
+    <p>
+      The goal was not to run random commands until something worked. The idea was:
+      identify services, look for information leaks, use that information to get a
+      valid login, then check what the user can access.
+    </p>
+
+    <pre><code>scan → enumerate → collect clues → login → check permissions → read flags</code></pre>
+
+    <h2>1. Initial scan</h2>
+    <p>
+      I started with Nmap using default scripts and version detection. This gives
+      a quick view of the exposed services and sometimes already reveals useful
+      misconfigurations.
+    </p>
+
+    <pre><code>nmap -sS -sV -sC TARGET_IP</code></pre>
+
+    <img src="../../assets/brooklyn-nine-nine/01-nmap-command.png" alt="Nmap command being prepared">
+
+    <p>
+      The useful result was that FTP and SSH were open. The important detail was
+      not just that FTP existed, but that anonymous login was allowed.
+    </p>
+
+    <img src="../../assets/brooklyn-nine-nine/02-nmap-ftp-anonymous.png" alt="Nmap result showing anonymous FTP login allowed">
+
+    <h2>2. Anonymous FTP</h2>
+    <p>
+      Since anonymous FTP was enabled, I connected without real credentials. This
+      is worth checking because public FTP access often exposes notes, backups,
+      usernames or other hints.
+    </p>
+
+    <pre><code>ftp TARGET_IP
+Name: anonymous</code></pre>
+
+    <img src="../../assets/brooklyn-nine-nine/03-ftp-login.png" alt="Anonymous FTP login">
+
+    <p>
+      After logging in, I listed the directory and found one file:
+      <code>note_to_jake.txt</code>. I downloaded it locally to read it.
+    </p>
+
+    <pre><code>ls
+get note_to_jake.txt</code></pre>
+
+    <img src="../../assets/brooklyn-nine-nine/04-ftp-get-note.png" alt="Downloading note_to_jake.txt from FTP">
+
+    <h2>3. Reading the note</h2>
+    <p>
+      The file was the main clue. It mentioned <code>jake</code> and said his
+      password was weak. That gives two things at once: a likely username and a
+      reason to test SSH authentication.
+    </p>
+
+    <pre><code>cat note_to_jake.txt</code></pre>
+
+    <img src="../../assets/brooklyn-nine-nine/05-note-content.png" alt="Content of note_to_jake.txt">
+
+    <h2>4. Testing SSH</h2>
+    <p>
+      SSH was open from the scan, and now I had a username. I used Hydra with
+      RockYou to test the weak-password hint from the note.
+    </p>
+
+    <pre><code>hydra -l jake -P /usr/share/wordlists/rockyou.txt TARGET_IP ssh</code></pre>
+
+    <img src="../../assets/brooklyn-nine-nine/06-hydra-command.png" alt="Hydra command against SSH">
+
+    <p>
+      Hydra found a valid password for <code>jake</code>. At this point, the FTP
+      information disclosure turned into real shell access.
+    </p>
+
+    <img src="../../assets/brooklyn-nine-nine/07-hydra-success.png" alt="Hydra finding Jake's SSH password">
+
+    <h2>5. User flag</h2>
+    <p>
+      After logging in over SSH, I checked the accessible home directories and read
+      the user flag. In this room, the flag was not in Jake's own home directory;
+      it was inside <code>/home/holt</code>.
+    </p>
+
+    <pre><code>ssh jake@TARGET_IP
+cd /home/holt
+cat user.txt</code></pre>
+
+    <img src="../../assets/brooklyn-nine-nine/08-user-flag.png" alt="Reading user.txt">
+
+    <h2>6. Checking sudo</h2>
+    <p>
+      After getting a shell, one of the first checks is <code>sudo -l</code>. It
+      shows what the current user is allowed to run with elevated privileges.
+    </p>
+
+    <pre><code>sudo -l</code></pre>
+
+    <img src="../../assets/brooklyn-nine-nine/09-sudo-l.png" alt="sudo -l output showing less can be run without password">
+
+    <p>
+      The result showed that <code>jake</code> could run <code>/usr/bin/less</code>
+      as root without a password. For this room, I did not need to spawn a root
+      shell. I only needed to read the final flag.
+    </p>
+
+    <h2>7. Root flag</h2>
+    <p>
+      Because <code>less</code> was allowed through sudo, I used it directly to
+      open <code>/root/root.txt</code>.
+    </p>
+
+    <pre><code>sudo less /root/root.txt</code></pre>
+
+    <img src="../../assets/brooklyn-nine-nine/10-less-command.png" alt="Running sudo less against root.txt">
+
+    <p>
+      That opened the file and completed the machine.
+    </p>
+
+    <img src="../../assets/brooklyn-nine-nine/11-root-flag.png" alt="Root flag displayed in less">
+
+    <hr>
+
+<p class="footer-note">
+  If you enjoyed this write-up, consider following me on TryHackMe. If this repository helped you, consider giving it a star on GitHub. Thanks for reading.
+</p>
+  </main>
+
+  <script>
+    const root = document.documentElement;
+    const button = document.getElementById("themeToggle");
+    const savedTheme = localStorage.getItem("theme");
+
+    if (savedTheme) {
+      root.setAttribute("data-theme", savedTheme);
+      button.textContent = savedTheme === "dark" ? "light mode" : "dark mode";
+    }
+
+    button.addEventListener("click", () => {
+      const current = root.getAttribute("data-theme");
+      const next = current === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      localStorage.setItem("theme", next);
+      button.textContent = next === "dark" ? "light mode" : "dark mode";
+    });
+  </script>
+</body>
+</html>
