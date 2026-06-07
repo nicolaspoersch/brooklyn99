@@ -1,1 +1,1 @@
-👉 Read it here: https://nicolaspoersch.github.io/brooklyn99/
+👉 Read it here:  https://nicolaspoersch.github.io/tryhackme-write-ups/
