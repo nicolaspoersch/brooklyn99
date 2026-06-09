@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DAV — TryHackMe</title>
+  <link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle theme">
+    dark mode
+  </button>
+
+  <main class="page">
+    <p class="crumb"><a class="small-link" href="../../">Write-ups</a> / TryHackMe / Linux</p>
+
+    <h1>DAV</h1>
+
+    <p class="lead">
+      My notes for the DAV room. This machine was mainly about finding a WebDAV directory,
+      understanding the authentication, uploading a PHP reverse shell, and then abusing a simple
+      sudo rule to read the final flag.
+    </p>
+
+    <div class="meta">
+      <span>Easy</span>
+      <span>Linux</span>
+      <span>HTTP</span>
+      <span>WebDAV</span>
+      <span>PHP</span>
+      <span>Reverse Shell</span>
+      <span>sudo</span>
+    </div>
+
+    <aside class="notice">
+      <strong>Small note before reading:</strong>
+      I do not usually write write-ups, so this is more of a clean learning log than
+      a polished guide. Also, if you are reading this just to copy answers, you are
+      using it the wrong way.
+    </aside>
+
+    <hr>
+
+    <h2>0. Plan</h2>
+    <p>
+      The plan was simple: scan the machine, enumerate the web service, understand what WebDAV
+      was exposing, get upload access, trigger a reverse shell, and then check the usual local
+      privilege escalation paths.
+    </p>
+
+    <pre><code>scan → enumerate web → find WebDAV → authenticate → upload shell → get user flag → check system → check sudo → root flag</code></pre>
+
+    <h2>1. Initial scan</h2>
+    <p>
+      I started with Nmap to see what was exposed. The result was very small: only HTTP was open.
+      That made the next step obvious, because there was no SSH, FTP, or other service to attack
+      directly.
+    </p>
+
+    <pre><code>nmap -sS -sV -T5 TARGET_IP</code></pre>
+
+    <img src="../../assets/dav/nmap-enumeration.png" alt="Nmap result showing HTTP open">
+
+    <h2>2. Looking for hidden content</h2>
+    <p>
+      Since the default Apache page did not give me anything useful, I used Gobuster to search
+      for hidden directories and files.
+    </p>
+
+    <pre><code>gobuster dir -u http://TARGET_IP -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -x txt -t 125</code></pre>
+
+    <p>
+      The important result here was <code>/webdav</code>. WebDAV is interesting because, when
+      misconfigured, it can allow authenticated users to upload files to the server.
+    </p>
+
+    <img src="../../assets/dav/gobuster-result.png" alt="Gobuster result showing webdav directory">
+
+    <h2>3. WebDAV authentication</h2>
+    <p>
+      Opening <code>/webdav</code> in the browser asked for credentials. At this point I knew the
+      directory existed, but I still needed a valid username and password.
+    </p>
+
+    <img src="../../assets/dav/web-dav.png" alt="Browser asking for WebDAV credentials">
+
+    <p>
+      The room was clearly pointing to WebDAV/XAMPP-style behavior. Because of that, I tested
+      common default credentials before going deeper. The most obvious combinations were things
+      like <code>xampp:xampp</code>, <code>admin:admin</code>, <code>wampp:wampp</code>, and
+      <code>wampp:xampp</code>.
+    </p>
+
+    <p>
+      The one that worked was <code>wampp:xampp</code>. That made sense because <code>wampp</code>
+      is commonly associated with WebDAV examples in this type of lab, and <code>xampp</code> was
+      the predictable password to try in a beginner room.
+    </p>
+
+    <h2>4. The passwd.dav file</h2>
+    <p>
+      After logging in, the directory showed a file called <code>passwd.dav</code>. The file
+      contained what looked like a random MD5-style hash, so my first thought was to try cracking it.
+    </p>
+
+    <img src="../../assets/dav/webdav-original-content.png" alt="WebDAV directory showing passwd.dav">
+
+    <h2>5. Trying John</h2>
+    <p>
+      I tried John with <code>rockyou.txt</code>. This did not become the main path for me, but it
+      was still a reasonable thing to test because password/hash files often lead to reused
+      credentials.
+    </p>
+
+    <pre><code>john hash.txt --wordlist=/usr/share/wordlists/rockyou.txt</code></pre>
+
+    <img src="../../assets/dav/hydra-crack.png" alt="Trying to crack the WebDAV hash with John">
+
+    <h2>6. Logging in with cadaver</h2>
+    <p>
+      Since the WebDAV credentials worked in the browser, I used <code>cadaver</code> to interact
+      with the WebDAV share from the terminal. This confirmed that I could authenticate as
+      <code>wampp</code> and list the remote directory.
+    </p>
+
+    <pre><code>cadaver http://TARGET_IP/webdav</code></pre>
+
+    <img src="../../assets/dav/cadaver-login.png" alt="Logging into WebDAV with cadaver">
+
+    <h2>7. Uploading a PHP shell</h2>
+    <p>
+      The useful part of WebDAV is not only reading files. If upload is allowed, I can place a PHP
+      file inside the web directory and then trigger it from the browser.
+    </p>
+
+    <p>
+      So I uploaded a small PHP reverse shell using <code>put</code>.
+    </p>
+
+    <pre><code>put shell.php</code></pre>
+
+    <img src="../../assets/dav/php-upload.png" alt="Uploading shell.php through WebDAV">
+
+    <p>
+      After the upload, the file appeared inside the WebDAV directory. That confirmed the server
+      accepted the PHP file.
+    </p>
+
+    <img src="../../assets/dav/php-on-webdav.png" alt="shell.php visible in WebDAV directory">
+
+    <h2>8. Preparing the listener</h2>
+    <p>
+      Before opening the uploaded PHP file, I started a Netcat listener. The reverse shell needs
+      something waiting on my machine, otherwise the connection will simply fail.
+    </p>
+
+    <pre><code>nc -lvnp 53</code></pre>
+
+    <img src="../../assets/dav/listening-port-to-shell.png" alt="Netcat listener on port 53">
+
+    <h2>9. Getting a shell</h2>
+    <p>
+      After visiting the uploaded <code>shell.php</code> from the browser, the connection came back
+      and I got a shell as <code>www-data</code>.
+    </p>
+
+    <img src="../../assets/dav/rev-shell-result.png" alt="Reverse shell received as www-data">
+
+    <h2>10. User flag</h2>
+    <p>
+      From there, I moved into Merlin's home directory and found the user flag.
+    </p>
+
+    <pre><code>cd /home/merlin
+ls
+cat user.txt</code></pre>
+
+    <img src="../../assets/dav/user-flag.png" alt="Reading user.txt">
+
+    <h2>11. Checking crontab</h2>
+    <p>
+      After getting the user flag, I checked the system crontab. This is a good habit because
+      scheduled tasks can sometimes reveal privilege escalation opportunities.
+    </p>
+
+    <p>
+      In this case, there was nothing useful for the path, but it was still worth checking.
+    </p>
+
+    <pre><code>cd /
+cat /etc/crontab</code></pre>
+
+    <img src="../../assets/dav/crontab-enumeration.png" alt="Checking /etc/crontab">
+
+    <h2>12. Checking sudo</h2>
+    <p>
+      The next important check was <code>sudo -l</code>. The output showed that <code>www-data</code>
+      could run <code>/bin/cat</code> as root without a password.
+    </p>
+
+    <pre><code>sudo -l</code></pre>
+
+    <img src="../../assets/dav/sudo.png" alt="sudo -l showing /bin/cat can be run as root">
+
+    <h2>13. Root flag</h2>
+    <p>
+      Since <code>cat</code> was allowed through sudo, I did not need a full root shell. I could
+      read the root flag directly.
+    </p>
+
+    <pre><code>sudo /bin/cat /root/root.txt</code></pre>
+
+    <img src="../../assets/dav/root-flag.png" alt="Reading root.txt with sudo cat">
+
+    <hr>
+
+    <p class="footer-note">
+      If you enjoyed this write-up, consider following me on TryHackMe. If this repository helped
+      you, consider giving it a star on GitHub. Thanks for reading.
+    </p>
+  </main>
+
+  <script>
+    const root = document.documentElement;
+    const button = document.getElementById("themeToggle");
+    const savedTheme = localStorage.getItem("theme");
+
+    if (savedTheme) {
+      root.setAttribute("data-theme", savedTheme);
+      button.textContent = savedTheme === "dark" ? "light mode" : "dark mode";
+    }
+
+    button.addEventListener("click", () => {
+      const current = root.getAttribute("data-theme");
+      const next = current === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      localStorage.setItem("theme", next);
+      button.textContent = next === "dark" ? "light mode" : "dark mode";
+    });
+  </script>
+</body>
+</html>
